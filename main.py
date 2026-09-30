@@ -7,33 +7,32 @@ Week 2+ will add WebSocket streaming and full negotiation orchestration.
 from __future__ import annotations
 import logging
 import os
-from contextlib import asynccontextmanager
-from typing import Optional
-
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Ensure parent directory is in sys.path so "negotiateai" package resolves properly
-_pkg_root = str(Path(__file__).resolve().parent.parent)
+# Ensure the project root is importable regardless of where Python is launched from.
+_pkg_root = str(Path(__file__).resolve().parent)
 if _pkg_root not in sys.path:
     sys.path.insert(0, _pkg_root)
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from negotiateai.core.message_bus import get_message_bus
-from negotiateai.core.nebius_client import get_nebius_client
-from negotiateai.core.schema import (
-    NegotiationMessage,
+from Negotiate_AI.core.message_bus import get_message_bus
+from Negotiate_AI.core.nebius_client import get_nebius_client
+from Negotiate_AI.core.schema import (
+    MessageType,
     QualityTier,
     TaskAnnouncement,
     TaskConstraints,
 )
-from negotiateai.agents.cost_agent import CostAgent
+from Negotiate_AI.agents.cost_agent import CostAgent
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -41,8 +40,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("negotiateai.main")
 
-
-# ── Lifespan: connect/disconnect Redis on startup/shutdown ───────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,8 +50,6 @@ async def lifespan(app: FastAPI):
     await bus.disconnect()
     logger.info("👋 Redis message bus disconnected")
 
-
-# ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="NegotiateAI",
@@ -70,8 +65,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ── Request / Response models ─────────────────────────────────────────────────
 
 class CreateTaskRequest(BaseModel):
     title: str
@@ -94,8 +87,6 @@ class RunCostAgentRequest(BaseModel):
     task_id: str
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
 @app.get("/", tags=["meta"])
 async def root():
     return {
@@ -110,37 +101,32 @@ async def root():
 async def health():
     """Check all dependencies: Nebius API + Redis message bus."""
     nebius_status = await get_nebius_client().health_check()
-    bus_status    = await get_message_bus().health_check()
+    bus_status = await get_message_bus().health_check()
     ok = nebius_status.get("status") == "ok" and bus_status.get("status") == "ok"
     return {
         "status": "ok" if ok else "degraded",
         "nebius": nebius_status,
-        "redis":  bus_status,
+        "redis": bus_status,
     }
 
 
 @app.post("/tasks", response_model=CreateTaskResponse, tags=["tasks"])
 async def create_task(req: CreateTaskRequest):
-    """
-    Create a new negotiation task.
-    Returns a task_id that all subsequent calls use.
-    """
     constraints = TaskConstraints(
-        max_budget_usd      = req.max_budget_usd,
-        quantity            = req.quantity,
-        max_delivery_days   = req.max_delivery_days,
-        min_quality_tier    = req.min_quality_tier,
-        max_vendor_risk     = req.max_vendor_risk,
-        min_warranty_months = req.min_warranty_months,
+        max_budget_usd=req.max_budget_usd,
+        quantity=req.quantity,
+        max_delivery_days=req.max_delivery_days,
+        min_quality_tier=req.min_quality_tier,
+        max_vendor_risk=req.max_vendor_risk,
+        min_warranty_months=req.min_warranty_months,
     )
     task = TaskAnnouncement(
-        title       = req.title,
-        description = req.description,
-        constraints = constraints,
-        max_rounds  = req.max_rounds,
+        title=req.title,
+        description=req.description,
+        constraints=constraints,
+        max_rounds=req.max_rounds,
     )
 
-    # Publish the task announcement to the bus
     bus = get_message_bus()
     announcement = task.to_negotiation_message()
     await bus.publish(task.task_id, announcement)
@@ -149,106 +135,77 @@ async def create_task(req: CreateTaskRequest):
     return CreateTaskResponse(
         task_id=task.task_id,
         message=f"Task '{task.title}' created. "
-                f"Budget: ${req.max_budget_usd:,.0f}, "
-                f"Qty: {req.quantity}, "
-                f"Deadline: {req.max_delivery_days}d",
+        f"Budget: ${req.max_budget_usd:,.0f}, "
+        f"Qty: {req.quantity}, "
+        f"Deadline: {req.max_delivery_days}d",
     )
 
 
 @app.post("/tasks/{task_id}/run-cost-agent", tags=["agents"])
 async def run_cost_agent(task_id: str, body: Optional[RunCostAgentRequest] = None):
-    """
-    Week 1 endpoint: Run the Cost Agent for a given task.
-    The agent researches vendors via Tavily and publishes an opening proposal.
-    Returns the proposal message so you can inspect it immediately.
-    """
-    # Reconstruct task from the log (in production this would come from a DB)
     bus = get_message_bus()
     log = await bus.get_log(task_id)
 
     if not log:
         raise HTTPException(status_code=404, detail=f"No messages found for task_id={task_id}")
 
-    # Find the TASK_ANNOUNCEMENT message
-    from negotiateai.core.schema import MessageType
     announcement_msg = next(
-        (m for m in log if m.msg_type == MessageType.TASK_ANNOUNCEMENT), None
+        (m for m in log if m.msg_type == MessageType.TASK_ANNOUNCEMENT),
+        None,
     )
     if not announcement_msg:
         raise HTTPException(status_code=400, detail="No TASK_ANNOUNCEMENT found in log")
 
-    # Rebuild the TaskAnnouncement — in Week 4 this comes from PostgreSQL
-    # For now we store a minimal stub version
+    # Week 1: use the combined /negotiate endpoint to generate a proposal inline.
     raise HTTPException(
         status_code=501,
-        detail=(
-            "Week 1 stub: Use the /negotiate endpoint instead, which takes the full task inline. "
-            "Full task persistence (PostgreSQL) is implemented in Week 4."
-        ),
+        detail="Week 1 stub: Use the /negotiate endpoint instead, which takes the full task inline.",
     )
 
 
 @app.post("/negotiate", tags=["agents"])
 async def negotiate(req: CreateTaskRequest):
-    """
-    Week 1 combined endpoint:
-    1. Creates the task
-    2. Runs the Cost Agent to generate an opening proposal
-    3. Returns the full proposal for inspection
-
-    This is the primary Week 1 demo endpoint.
-    """
-    # Build task
     constraints = TaskConstraints(
-        max_budget_usd      = req.max_budget_usd,
-        quantity            = req.quantity,
-        max_delivery_days   = req.max_delivery_days,
-        min_quality_tier    = req.min_quality_tier,
-        max_vendor_risk     = req.max_vendor_risk,
-        min_warranty_months = req.min_warranty_months,
+        max_budget_usd=req.max_budget_usd,
+        quantity=req.quantity,
+        max_delivery_days=req.max_delivery_days,
+        min_quality_tier=req.min_quality_tier,
+        max_vendor_risk=req.max_vendor_risk,
+        min_warranty_months=req.min_warranty_months,
     )
     task = TaskAnnouncement(
-        title       = req.title,
-        description = req.description,
-        constraints = constraints,
-        max_rounds  = req.max_rounds,
+        title=req.title,
+        description=req.description,
+        constraints=constraints,
+        max_rounds=req.max_rounds,
     )
 
-    # Publish announcement
-    bus    = get_message_bus()
+    bus = get_message_bus()
     client = get_nebius_client()
     await bus.publish(task.task_id, task.to_negotiation_message())
 
-    # Run Cost Agent
     agent = CostAgent(nebius_client=client, message_bus=bus)
-    agent.task          = task
+    agent.task = task
     agent.current_round = 1
 
     logger.info(f"🤖 Running Cost Agent for task {task.task_id}...")
     proposal_msg = await agent.generate_opening_proposal(task)
-
-    # Publish the proposal to the bus
     await bus.publish(task.task_id, proposal_msg)
 
-    # Return full context
     return {
-        "task_id":       task.task_id,
-        "task_title":    task.title,
-        "agent":         "cost_agent",
-        "round":         1,
-        "proposal":      proposal_msg.model_dump(mode="json"),
+        "task_id": task.task_id,
+        "task_title": task.title,
+        "agent": "cost_agent",
+        "round": 1,
+        "proposal": proposal_msg.model_dump(mode="json"),
         "utility_score": proposal_msg.utility_score,
-        "log_count":     await bus.get_log_count(task.task_id),
-        "next_steps":    "POST /tasks/{task_id}/log to see full message history",
+        "log_count": await bus.get_log_count(task.task_id),
+        "next_steps": "POST /tasks/{task_id}/log to see full message history",
     }
 
 
 @app.get("/tasks/{task_id}/log", tags=["tasks"])
 async def get_task_log(task_id: str):
-    """
-    Retrieve the full audit log for a negotiation session.
-    Returns all messages in chronological order.
-    """
     bus = get_message_bus()
     log = await bus.get_log(task_id)
 
@@ -256,15 +213,14 @@ async def get_task_log(task_id: str):
         raise HTTPException(status_code=404, detail=f"No log found for task_id={task_id}")
 
     return {
-        "task_id":    task_id,
-        "msg_count":  len(log),
-        "messages":   [m.model_dump(mode="json") for m in log],
+        "task_id": task_id,
+        "msg_count": len(log),
+        "messages": [m.model_dump(mode="json") for m in log],
     }
 
 
 @app.delete("/tasks/{task_id}", tags=["tasks"])
 async def clear_task(task_id: str):
-    """Clear all Redis data for a task (useful during development/testing)."""
     bus = get_message_bus()
     await bus.clear_task(task_id)
     return {"status": "cleared", "task_id": task_id}

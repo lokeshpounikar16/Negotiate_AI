@@ -1,0 +1,1 @@
+"""NegotiateAI Week 1 application package."""
