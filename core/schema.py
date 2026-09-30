@@ -114,25 +114,18 @@ class NegotiationMessage(BaseModel):
     batna_activated: bool                  = Field(default=False, description="True if agent has activated its BATNA")
     is_final_position: bool                = Field(default=False, description="True if agent cannot concede further")
 
-    @field_validator("proposal")
-    @classmethod
-    def proposal_required_for_proposal_types(cls, v, info):
-        msg_type = info.data.get("msg_type")
+    @model_validator(mode="after")
+    def validate_message_contract(self):
         needs_proposal = {
             MessageType.PROPOSAL,
             MessageType.COUNTER_PROPOSAL,
             MessageType.MEDIATOR_PROPOSAL,
         }
-        if msg_type in needs_proposal and v is None:
-            raise ValueError(f"proposal payload is required for msg_type={msg_type}")
-        return v
-
-    @field_validator("rejection_reason")
-    @classmethod
-    def rejection_reason_required_for_reject(cls, v, info):
-        if info.data.get("msg_type") == MessageType.REJECT and not v:
+        if self.msg_type in needs_proposal and self.proposal is None:
+            raise ValueError(f"proposal payload is required for msg_type={self.msg_type}")
+        if self.msg_type == MessageType.REJECT and not self.rejection_reason:
             raise ValueError("rejection_reason is required for REJECT messages")
-        return v
+        return self
 
     def to_agent_view(self) -> dict:
         """

@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from Negotiate_AI.core.schema import (
@@ -73,3 +75,14 @@ def test_task_constraints_accept_valid_proposal(task):
     ok, violations = task.constraints.validate_proposal(proposal)
     assert ok is True
     assert violations == []
+
+
+def test_nebius_health_check_degrades_without_api_key(monkeypatch):
+    from Negotiate_AI.core.nebius_client import NebiusClient
+
+    monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
+
+    client = NebiusClient(api_key=None)
+    result = asyncio.run(client.health_check())
+
+    assert result["status"] == "degraded"

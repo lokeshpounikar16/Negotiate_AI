@@ -39,18 +39,20 @@ class NebiusClient:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
     ):
-        self.api_key  = api_key  or os.environ["NEBIUS_API_KEY"]
+        self.api_key = api_key or os.getenv("NEBIUS_API_KEY")
         self.base_url = base_url or os.environ.get(
             "NEBIUS_BASE_URL", "https://api.tokenfactory.nebius.com/v1/"
         )
-        self.model    = model    or os.environ.get(
+        self.model = model or os.environ.get(
             "NEBIUS_MODEL", "meta-llama/Meta-Llama-3.1-70B-Instruct"
         )
 
-        self._client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
-        )
+        self._client = None
+        if self.api_key:
+            self._client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+            )
 
     async def complete(
         self,
@@ -63,6 +65,12 @@ class NebiusClient:
         Raw completion — returns the model's text response.
         Use complete_structured when you need a typed Pydantic object back.
         """
+        if self._client is None or not self.api_key:
+            raise RuntimeError(
+                "NEBIUS_API_KEY is not configured. Set it in the environment or .env "
+                "before invoking a model call."
+            )
+
         response = await self._client.chat.completions.create(
             model=self.model,
             messages=[
@@ -140,6 +148,13 @@ class NebiusClient:
 
     async def health_check(self) -> dict[str, Any]:
         """Quick sanity check to confirm Nebius API is reachable and responding."""
+        if not self.api_key or self._client is None:
+            return {
+                "status": "degraded",
+                "error": "NEBIUS_API_KEY is not configured; model calls are disabled in local mode.",
+                "model": self.model,
+            }
+
         try:
             response = await self.complete(
                 system_prompt="You are a health check endpoint.",
@@ -149,7 +164,7 @@ class NebiusClient:
             )
             return {"status": "ok", "model": self.model, "raw": response.strip()}
         except Exception as e:
-            return {"status": "error", "error": str(e)}
+            return {"status": "degraded", "error": str(e), "model": self.model}
 
 
 # Module-level singleton — agents import this directly
