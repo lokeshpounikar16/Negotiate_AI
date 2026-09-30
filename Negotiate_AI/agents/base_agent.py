@@ -7,10 +7,8 @@ Defines the lifecycle: receive task → evaluate → propose → respond to coun
 from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from ..core.message_bus import MessageBus
-from ..core.nebius_client import NebiusClient
 from ..core.schema import (
     AgentID,
     MessageType,
@@ -18,6 +16,10 @@ from ..core.schema import (
     ProposalPayload,
     TaskAnnouncement,
 )
+
+if TYPE_CHECKING:
+    from ..core.message_bus import MessageBus
+    from ..core.nebius_client import NebiusClient
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +40,8 @@ class BaseAgent(ABC):
     def __init__(
         self,
         agent_id: AgentID,
-        nebius_client: NebiusClient,
-        message_bus: MessageBus,
+        nebius_client: "NebiusClient | None",
+        message_bus: "MessageBus | None",
         batna_threshold: float = 0.3,  # Walk away if utility < this
     ):
         self.agent_id        = agent_id

@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from ..agents.mediator_agent import MediatorAgent
 from ..core.schema import AgentID, MessageType, NegotiationMessage, ProposalPayload
 
 
 class RoundManager:
     """Coordinates a single negotiation round across multiple agents."""
 
-    def __init__(self, agents: Dict[str, object], max_rounds: int = 10, task_id: str = "default-task"):
+    def __init__(
+        self,
+        agents: Dict[str, object],
+        max_rounds: int = 10,
+        task_id: str = "default-task",
+        mediator: Optional[MediatorAgent] = None,
+    ):
         self.agents = agents
         self.max_rounds = max_rounds
         self.task_id = task_id
@@ -20,6 +27,8 @@ class RoundManager:
         self.agent_utilities: Dict[str, List[float]] = {
             agent_id: [] for agent_id in self.agent_order
         }
+        self.mediator = mediator or MediatorAgent(nebius_client=None, message_bus=None)
+        self.deadlock_detected = False
 
     def _coerce_agent_id(self, agent_id: str | AgentID) -> AgentID:
         if isinstance(agent_id, AgentID):
@@ -51,6 +60,14 @@ class RoundManager:
                 )
                 round_messages.append(msg)
                 self._record_message(msg)
+
+            if self.mediator and self.mediator.detect_deadlock(self.messages):
+                self.deadlock_detected = True
+                compromise = self.mediator.propose_compromise(self.messages, self.agents, round_num, self.task_id)
+                if compromise is not None:
+                    self.messages.append(compromise)
+                    self.agent_utilities.setdefault("mediator_agent", []).append(compromise.utility_score or 0.0)
+                    return [compromise]
             return round_messages
 
         if not self.messages:
@@ -85,6 +102,15 @@ class RoundManager:
                 )
             round_messages.append(msg)
             self._record_message(msg)
+
+        if self.mediator and round_num > 1 and self.mediator.detect_deadlock(self.messages):
+            self.deadlock_detected = True
+            compromise = self.mediator.propose_compromise(self.messages, self.agents, round_num, self.task_id)
+            if compromise is not None:
+                self.messages.append(compromise)
+                self.agent_utilities.setdefault("mediator_agent", []).append(compromise.utility_score or 0.0)
+                return [compromise]
+
         return round_messages
 
     def has_converged(self) -> bool:

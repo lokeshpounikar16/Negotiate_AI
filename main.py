@@ -34,6 +34,7 @@ from Negotiate_AI.core.schema import (
     TaskConstraints,
 )
 from Negotiate_AI.agents.cost_agent import CostAgent
+from Negotiate_AI.agents.mediator_agent import MediatorAgent
 from Negotiate_AI.agents.quality_agent import QualityAgent
 from Negotiate_AI.agents.risk_agent import RiskAgent
 from Negotiate_AI.agents.timeline_agent import TimelineAgent
@@ -237,7 +238,13 @@ async def run_negotiation(req: CreateTaskRequest):
     for agent in agents.values():
         agent.task = task
 
-    manager = RoundManager(agents, max_rounds=req.max_rounds, task_id=task.task_id)
+    mediator = MediatorAgent(nebius_client=client, message_bus=bus)
+    manager = RoundManager(
+        agents,
+        max_rounds=req.max_rounds,
+        task_id=task.task_id,
+        mediator=mediator,
+    )
     round_1_messages = await manager.execute_round(1)
     await bus.publish(task.task_id, task.to_negotiation_message())
     for msg in round_1_messages:
@@ -248,6 +255,7 @@ async def run_negotiation(req: CreateTaskRequest):
         "status": "completed",
         "round": 1,
         "converged": manager.has_converged(),
+        "deadlock_detected": manager.deadlock_detected,
         "messages": [msg.model_dump(mode="json") for msg in round_1_messages],
         "agent_utilities": {
             agent_id: utilities[-1] if utilities else 0.0

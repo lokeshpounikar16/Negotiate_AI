@@ -3,6 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from Negotiate_AI.agents.cost_agent import CostAgent
+from Negotiate_AI.agents.mediator_agent import MediatorAgent
 from Negotiate_AI.agents.quality_agent import QualityAgent
 from Negotiate_AI.agents.risk_agent import RiskAgent
 from Negotiate_AI.agents.timeline_agent import TimelineAgent
@@ -57,3 +58,24 @@ def test_week2_negotiation_endpoint_is_registered():
     client = TestClient(app)
     routes = [route.path for route in client.app.routes]
     assert "/negotiation/run" in routes
+
+
+def test_mediator_detects_deadlock_after_stagnation():
+    mediator = MediatorAgent(deadlock_threshold=2)
+    messages = []
+
+    for round_num in range(1, 5):
+        for agent_name in ["cost_agent", "quality_agent", "timeline_agent", "risk_agent"]:
+            messages.append(
+                {
+                    "round": round_num,
+                    "sender": agent_name,
+                    "msg_type": "PROPOSAL",
+                    "task_id": "task-123",
+                    "proposal": None,
+                    "public_reason": "stagnant",
+                    "utility_score": 0.40,
+                }
+            )
+
+    assert mediator.detect_deadlock(messages) is True
