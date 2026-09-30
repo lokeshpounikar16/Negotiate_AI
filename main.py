@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -49,11 +49,17 @@ logger = logging.getLogger("negotiateai.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     bus = get_message_bus()
-    await bus.connect()
-    logger.info("✅ Redis message bus connected")
+    app.state.redis_connected = False
+    try:
+        await bus.connect()
+        app.state.redis_connected = True
+        logger.info("✅ Redis message bus connected")
+    except Exception as exc:
+        logger.warning("⚠️ Redis unavailable during startup; continuing in degraded mode: %s", exc)
     yield
-    await bus.disconnect()
-    logger.info("👋 Redis message bus disconnected")
+    if app.state.redis_connected:
+        await bus.disconnect()
+        logger.info("👋 Redis message bus disconnected")
 
 
 app = FastAPI(
@@ -69,6 +75,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class NegotiationWebSocketManager:
+    def __init__(self):
+        self.clients: set[WebSocket] = set()
+
+    async def add_client(self, websocket: WebSocket):
+        self.clients.add(websocket)
+        await websocket.send_json({"type": "connected", "status": "live"})
+
+    async def remove_client(self, websocket: WebSocket):
+        self.clients.discard(websocket)
+
+    async def broadcast(self, payload: dict):
+        stale_clients: list[WebSocket] = []
+        for websocket in list(self.clients):
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                stale_clients.append(websocket)
+        for websocket in stale_clients:
+            await self.remove_client(websocket)
+
+
+negotiation_manager = NegotiationWebSocketManager()
+
+
+async def broadcast_negotiation_update(task_id: str, payload: dict):
+    update = dict(payload)
+    update.setdefault("task_id", task_id)
+    await negotiation_manager.broadcast(update)
 
 
 class CreateTaskRequest(BaseModel):
@@ -97,8 +134,8 @@ async def root():
     return {
         "project": "NegotiateAI",
         "version": "0.1.0",
-        "week": 1,
-        "status": "Foundation — Cost Agent + Message Bus",
+        "week": 4,
+        "status": "Live negotiation dashboard + message streaming",
     }
 
 
@@ -113,6 +150,37 @@ async def health():
         "nebius": nebius_status,
         "redis": bus_status,
     }
+
+
+@app.websocket("/ws/negotiation")
+async def negotiation_websocket(websocket: WebSocket):
+    await websocket.accept()
+    await negotiation_manager.add_client(websocket)
+    try:
+        while True:
+            message = await websocket.receive_text()
+            if message == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        await negotiation_manager.remove_client(websocket)
+    except Exception:
+        await negotiation_manager.remove_client(websocket)
+
+
+@app.websocket("/ws/tasks/{task_id}")
+async def task_websocket(websocket: WebSocket, task_id: str):
+    await websocket.accept()
+    await websocket.send_json({"type": "task_stream_connected", "task_id": task_id, "status": "live"})
+    await negotiation_manager.add_client(websocket)
+    try:
+        while True:
+            message = await websocket.receive_text()
+            if message == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        await negotiation_manager.remove_client(websocket)
+    except Exception:
+        await negotiation_manager.remove_client(websocket)
 
 
 @app.post("/tasks", response_model=CreateTaskResponse, tags=["tasks"])
@@ -135,6 +203,7 @@ async def create_task(req: CreateTaskRequest):
     bus = get_message_bus()
     announcement = task.to_negotiation_message()
     await bus.publish(task.task_id, announcement)
+    await broadcast_negotiation_update(task.task_id, {"type": "task_created", "message": announcement.model_dump(mode="json")})
 
     logger.info(f"✅ Task created: {task.task_id} — {task.title}")
     return CreateTaskResponse(
@@ -188,6 +257,7 @@ async def negotiate(req: CreateTaskRequest):
     bus = get_message_bus()
     client = get_nebius_client()
     await bus.publish(task.task_id, task.to_negotiation_message())
+    await broadcast_negotiation_update(task.task_id, {"type": "task_announcement", "message": task.to_negotiation_message().model_dump(mode="json")})
 
     agent = CostAgent(nebius_client=client, message_bus=bus)
     agent.task = task
@@ -247,8 +317,10 @@ async def run_negotiation(req: CreateTaskRequest):
     )
     round_1_messages = await manager.execute_round(1)
     await bus.publish(task.task_id, task.to_negotiation_message())
+    await broadcast_negotiation_update(task.task_id, {"type": "task_announcement", "message": task.to_negotiation_message().model_dump(mode="json")})
     for msg in round_1_messages:
         await bus.publish(task.task_id, msg)
+        await broadcast_negotiation_update(task.task_id, {"type": "negotiation_message", "message": msg.model_dump(mode="json")})
 
     return {
         "task_id": task.task_id,
