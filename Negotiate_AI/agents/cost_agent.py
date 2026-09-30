@@ -169,6 +169,52 @@ Always respond with valid JSON matching the requested schema. No markdown, no pr
         )
         return utility
 
+    def generate_proposal(self) -> ProposalPayload:
+        """Deterministic fallback proposal for the Week 2 round manager."""
+        quantity = self.task.constraints.quantity if self.task else 500
+        unit_price = 3200.0
+        total = unit_price * quantity
+        return ProposalPayload(
+            vendor="Lenovo ThinkSystem",
+            unit_price_usd=unit_price,
+            quantity=quantity,
+            total_cost_usd=total,
+            delivery_days=52,
+            quality_tier=QualityTier.B_PLUS,
+            vendor_risk_score=0.22,
+            warranty_months=24,
+            sla_uptime_pct=99.5,
+            source_country="USA",
+            notes="Cost-first proposal that keeps the deal inside budget while meeting minimum quality constraints.",
+        )
+
+    def evaluate_proposal(self, proposal: ProposalPayload) -> bool:
+        """Accept reasonably cheap proposals that satisfy the negotiated constraints."""
+        if self.task is not None:
+            is_valid, _ = self.task.constraints.validate_proposal(proposal)
+            if not is_valid:
+                return False
+        utility = self.compute_utility(proposal)
+        return utility >= 0.60
+
+    def generate_counter_proposal(self, received: ProposalPayload) -> ProposalPayload:
+        """Offer a cheaper alternative when the incoming proposal is above the cost target."""
+        quantity = received.quantity
+        unit_price = min(3400.0, received.unit_price_usd * 0.96)
+        return ProposalPayload(
+            vendor="Lenovo ThinkSystem",
+            unit_price_usd=round(unit_price, 2),
+            quantity=quantity,
+            total_cost_usd=round(unit_price * quantity, 2),
+            delivery_days=min(received.delivery_days, 50),
+            quality_tier=QualityTier.B_PLUS,
+            vendor_risk_score=min(received.vendor_risk_score, 0.25),
+            warranty_months=max(received.warranty_months, 24),
+            sla_uptime_pct=99.5,
+            source_country=received.source_country,
+            notes="Counter-offer that keeps price low without breaching the hard constraints.",
+        )
+
     # ── Tavily vendor research ────────────────────────────────────────────────
 
     async def _research_vendors(self, task: TaskAnnouncement) -> str:
@@ -301,13 +347,17 @@ Respond with a JSON object matching the ProposalDecision schema.
         is_valid, violations = task.constraints.validate_proposal(incoming.proposal)
         if not is_valid:
             reason = "Proposal violates task constraints: " + "; ".join(violations)
-            return self._base_message(
+            msg = self._base_message(
                 msg_type=MessageType.REJECT,
                 in_reply_to=incoming.msg_id,
                 public_reason=reason,
                 rejection_reason=reason,
                 utility_score=incoming_utility,
             )
+            msg.batna_activated = (
+                self.should_activate_batna(incoming.proposal) and self.current_round > 3
+            )
+            return msg
 
         # If utility is very high, accept without LLM call (fast path)
         if incoming_utility >= 0.80:

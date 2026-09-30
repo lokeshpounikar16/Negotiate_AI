@@ -26,6 +26,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from Negotiate_AI.core.message_bus import get_message_bus
 from Negotiate_AI.core.nebius_client import get_nebius_client
+from Negotiate_AI.core.round_manager import RoundManager
 from Negotiate_AI.core.schema import (
     MessageType,
     QualityTier,
@@ -33,6 +34,9 @@ from Negotiate_AI.core.schema import (
     TaskConstraints,
 )
 from Negotiate_AI.agents.cost_agent import CostAgent
+from Negotiate_AI.agents.quality_agent import QualityAgent
+from Negotiate_AI.agents.risk_agent import RiskAgent
+from Negotiate_AI.agents.timeline_agent import TimelineAgent
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -201,6 +205,54 @@ async def negotiate(req: CreateTaskRequest):
         "utility_score": proposal_msg.utility_score,
         "log_count": await bus.get_log_count(task.task_id),
         "next_steps": "POST /tasks/{task_id}/log to see full message history",
+    }
+
+
+@app.post("/negotiation/run", tags=["negotiation"])
+async def run_negotiation(req: CreateTaskRequest):
+    """Execute the Week 2 multi-agent negotiation loop across all four agents."""
+    constraints = TaskConstraints(
+        max_budget_usd=req.max_budget_usd,
+        quantity=req.quantity,
+        max_delivery_days=req.max_delivery_days,
+        min_quality_tier=req.min_quality_tier,
+        max_vendor_risk=req.max_vendor_risk,
+        min_warranty_months=req.min_warranty_months,
+    )
+    task = TaskAnnouncement(
+        title=req.title,
+        description=req.description,
+        constraints=constraints,
+        max_rounds=req.max_rounds,
+    )
+
+    bus = get_message_bus()
+    client = get_nebius_client()
+    agents = {
+        "cost_agent": CostAgent(nebius_client=client, message_bus=bus),
+        "quality_agent": QualityAgent(nebius_client=client, message_bus=bus),
+        "timeline_agent": TimelineAgent(nebius_client=client, message_bus=bus),
+        "risk_agent": RiskAgent(nebius_client=client, message_bus=bus),
+    }
+    for agent in agents.values():
+        agent.task = task
+
+    manager = RoundManager(agents, max_rounds=req.max_rounds, task_id=task.task_id)
+    round_1_messages = await manager.execute_round(1)
+    await bus.publish(task.task_id, task.to_negotiation_message())
+    for msg in round_1_messages:
+        await bus.publish(task.task_id, msg)
+
+    return {
+        "task_id": task.task_id,
+        "status": "completed",
+        "round": 1,
+        "converged": manager.has_converged(),
+        "messages": [msg.model_dump(mode="json") for msg in round_1_messages],
+        "agent_utilities": {
+            agent_id: utilities[-1] if utilities else 0.0
+            for agent_id, utilities in manager.agent_utilities.items()
+        },
     }
 
 

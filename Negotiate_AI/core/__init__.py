@@ -11,10 +11,12 @@ from .schema import (
 )
 from .nebius_client import NebiusClient, get_nebius_client
 from .message_bus import MessageBus, get_message_bus
+from .round_manager import RoundManager
 
 __all__ = [
     "NegotiationMessage", "TaskAnnouncement", "TaskConstraints",
     "ProposalPayload", "AgentID", "MessageType", "QualityTier", "Concession",
     "NebiusClient", "get_nebius_client",
     "MessageBus", "get_message_bus",
+    "RoundManager",
 ]
