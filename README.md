@@ -66,4 +66,4 @@ uvicorn main:app --reload
 | `NEBIUS_API_KEY` | Your Nebius Token Factory API key |
 | `TAVILY_API_KEY` | Tavily search API key |
 | `REDIS_URL` | Redis connection string (default: redis://localhost:6379) |
-| `NEBIUS_MODEL` | Model ID (default: meta-llama/Meta-Llama-3.1-70B-Instruct) |
+| `NEBIUS_MODEL` | Nebius Token Factory model ID (default: NVIDIA Nemotron 3 Nano; verify/copy the exact ID from the [model catalog](https://tokenfactory.nebius.com/models/catalog)) |

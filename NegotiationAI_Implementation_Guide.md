@@ -151,10 +151,10 @@ pip install -r requirements.txt
 Create `.env.example`:
 
 ```env
-# Nebius/LLM Configuration
+# Nebius Token Factory (NVIDIA open model for the challenge)
 NEBIUS_API_KEY=your_nebius_api_key
-NEBIUS_MODEL=Llama-3.1-70B
-NEBIUS_API_ENDPOINT=https://api.nebius.ai/v1
+NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
+NEBIUS_MODEL=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
 
 # Anthropic (for comparisons)
 ANTHROPIC_API_KEY=your_anthropic_api_key

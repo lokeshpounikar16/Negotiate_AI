@@ -54,7 +54,7 @@ class NebiusClient:
             "NEBIUS_BASE_URL", "https://api.tokenfactory.nebius.com/v1/"
         )
         self.model = model or os.environ.get(
-            "NEBIUS_MODEL", "meta-llama/Meta-Llama-3.1-70B-Instruct"
+            "NEBIUS_MODEL", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
         )
 
         self._client = None

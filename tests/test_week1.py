@@ -81,8 +81,10 @@ def test_nebius_health_check_degrades_without_api_key(monkeypatch):
     from Negotiate_AI.core.nebius_client import NebiusClient
 
     monkeypatch.delenv("NEBIUS_API_KEY", raising=False)
+    monkeypatch.delenv("NEBIUS_MODEL", raising=False)
 
     client = NebiusClient(api_key=None)
     result = asyncio.run(client.health_check())
 
+    assert client.model == "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
     assert result["status"] == "degraded"
