@@ -187,8 +187,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">NegotiateAI</p>
-          <h1>Week 4 dashboard</h1>
+          <h1>NegotiateAI</h1>
         </div>
         <span className={`status-pill ${status}`}>{status}</span>
       </header>

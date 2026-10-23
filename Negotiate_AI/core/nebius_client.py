@@ -1,20 +1,13 @@
-"""
-Nebius LLM Inference Client
-Wraps the Nebius Token Factory OpenAI-compatible API.
-Uses structured output (JSON schema enforcement) for protocol compliance.
-"""
+"""Async client for Google's Gemini generateContent API."""
 
 from __future__ import annotations
 import json
 import logging
 import os
 from typing import Any, Optional, Type, TypeVar
+from urllib.parse import quote
 
-try:
-    from openai import AsyncOpenAI
-except ModuleNotFoundError:  # pragma: no cover - dependency is installed in project env
-    AsyncOpenAI = None
-
+import httpx
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -22,14 +15,12 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
-class NebiusClient:
+class GeminiClient:
     """
-    Async wrapper around the Nebius Token Factory API.
-    Nebius exposes an OpenAI-compatible endpoint, so we use the openai SDK
-    pointed at Nebius's base URL.
+    Async wrapper around Google's native Gemini generateContent API.
 
     Usage:
-        client = NebiusClient()
+        client = GeminiClient()
         result = await client.complete_structured(
             system_prompt="You are the Cost Agent...",
             user_prompt="Evaluate this task and propose a vendor.",
@@ -43,26 +34,11 @@ class NebiusClient:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
     ):
-        if AsyncOpenAI is None:
-            raise ModuleNotFoundError(
-                "The 'openai' package is required to use NebiusClient. "
-                "Install the project dependencies first."
-            )
-
-        self.api_key = api_key or os.getenv("NEBIUS_API_KEY")
-        self.base_url = base_url or os.environ.get(
-            "NEBIUS_BASE_URL", "https://api.tokenfactory.nebius.com/v1/"
-        )
-        self.model = model or os.environ.get(
-            "NEBIUS_MODEL", "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
-        )
-
-        self._client = None
-        if self.api_key:
-            self._client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-            )
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.base_url = (base_url or os.environ.get(
+            "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
+        )).rstrip("/")
+        self.model = model or os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 
     async def complete(
         self,
@@ -70,28 +46,48 @@ class NebiusClient:
         user_prompt: str,
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        response_mime_type: Optional[str] = None,
     ) -> str:
         """
         Raw completion — returns the model's text response.
         Use complete_structured when you need a typed Pydantic object back.
         """
-        if self._client is None or not self.api_key:
+        if not self.api_key:
             raise RuntimeError(
-                "NEBIUS_API_KEY is not configured. Set it in the environment or .env "
+                "GEMINI_API_KEY is not configured. Set it in the environment or .env "
                 "before invoking a model call."
             )
 
-        response = await self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
+        generation_config: dict[str, Any] = {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        }
+        if response_mime_type:
+            generation_config["responseMimeType"] = response_mime_type
+
+        endpoint = (
+            f"{self.base_url}/models/{quote(self.model, safe='')}:generateContent"
         )
-        content = response.choices[0].message.content
-        logger.debug(f"[Nebius] raw response: {content[:200]}...")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                endpoint,
+                headers={"X-goog-api-key": self.api_key},
+                json={
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                    "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+                    "generationConfig": generation_config,
+                },
+            )
+        response.raise_for_status()
+        payload = response.json()
+        candidates = payload.get("candidates", [])
+        if not candidates:
+            raise ValueError("Gemini returned no response candidates.")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        content = "".join(part["text"] for part in parts if "text" in part)
+        if not content:
+            raise ValueError("Gemini returned no text content.")
+        logger.debug(f"[Gemini] raw response: {content[:200]}...")
         return content
 
     async def complete_structured(
@@ -128,6 +124,7 @@ class NebiusClient:
                     user_prompt=user_prompt,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    response_mime_type="application/json",
                 )
 
                 # Strip any accidental markdown fences the model adds
@@ -137,12 +134,12 @@ class NebiusClient:
                     cleaned = "\n".join(lines[1:-1]) if lines[-1] == "```" else "\n".join(lines[1:])
 
                 parsed = output_schema.model_validate_json(cleaned)
-                logger.info(f"[Nebius] structured output parsed successfully (attempt {attempt})")
+                logger.info(f"[Gemini] structured output parsed successfully (attempt {attempt})")
                 return parsed
 
             except Exception as e:
                 last_error = e
-                logger.warning(f"[Nebius] parse attempt {attempt}/{max_retries} failed: {e}")
+                logger.warning(f"[Gemini] parse attempt {attempt}/{max_retries} failed: {e}")
                 if attempt < max_retries:
                     # Give the model a hint about what went wrong
                     user_prompt = (
@@ -157,11 +154,11 @@ class NebiusClient:
         )
 
     async def health_check(self) -> dict[str, Any]:
-        """Quick sanity check to confirm Nebius API is reachable and responding."""
-        if not self.api_key or self._client is None:
+        """Quick sanity check to confirm the Gemini API is reachable and responding."""
+        if not self.api_key:
             return {
                 "status": "degraded",
-                "error": "NEBIUS_API_KEY is not configured; model calls are disabled in local mode.",
+                "error": "GEMINI_API_KEY is not configured; model calls are disabled in local mode.",
                 "model": self.model,
             }
 
@@ -177,13 +174,21 @@ class NebiusClient:
             return {"status": "degraded", "error": str(e), "model": self.model}
 
 
-# Module-level singleton — agents import this directly
-_client: Optional[NebiusClient] = None
+# Keep the previous names available for existing agents and integrations.
+NebiusClient = GeminiClient
 
 
-def get_nebius_client() -> NebiusClient:
-    """Returns the shared NebiusClient instance (lazy-init)."""
+_client: Optional[GeminiClient] = None
+
+
+def get_gemini_client() -> GeminiClient:
+    """Returns the shared GeminiClient instance (lazy-init)."""
     global _client
     if _client is None:
-        _client = NebiusClient()
+        _client = GeminiClient()
     return _client
+
+
+def get_nebius_client() -> GeminiClient:
+    """Backward-compatible alias for get_gemini_client()."""
+    return get_gemini_client()

@@ -20,7 +20,7 @@ from pydantic import BaseModel
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from Negotiate_AI.core.message_bus import get_message_bus
-from Negotiate_AI.core.nebius_client import get_nebius_client
+from Negotiate_AI.core.nebius_client import get_gemini_client
 from Negotiate_AI.core.schema import (
     MessageType,
     QualityTier,
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NegotiateAI",
-    description="Agent-to-Agent Negotiation Protocol — Nebius × NVIDIA Hackathon",
+    description="Agent-to-Agent Negotiation Protocol powered by Google Gemini",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -104,7 +104,7 @@ def _build_task(req: CreateTaskRequest) -> TaskAnnouncement:
 
 
 async def _run_cost_agent(task: TaskAnnouncement, bus):
-    client = get_nebius_client()
+    client = get_gemini_client()
     agent = CostAgent(nebius_client=client, message_bus=bus)
     agent.task = task
     agent.current_round = 1
@@ -130,13 +130,13 @@ async def root():
 
 @app.get("/health", tags=["meta"])
 async def health():
-    """Check all dependencies: Nebius API + Redis message bus."""
-    nebius_status = await get_nebius_client().health_check()
+    """Check all dependencies: Gemini API + Redis message bus."""
+    gemini_status = await get_gemini_client().health_check()
     bus_status    = await get_message_bus().health_check()
-    ok = nebius_status.get("status") == "ok" and bus_status.get("status") == "ok"
+    ok = gemini_status.get("status") == "ok" and bus_status.get("status") == "ok"
     return {
         "status": "ok" if ok else "degraded",
-        "nebius": nebius_status,
+        "gemini": gemini_status,
         "redis":  bus_status,
     }
 

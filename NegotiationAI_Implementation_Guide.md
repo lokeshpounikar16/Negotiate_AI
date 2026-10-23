@@ -151,10 +151,10 @@ pip install -r requirements.txt
 Create `.env.example`:
 
 ```env
-# Nebius Token Factory (NVIDIA open model for the challenge)
-NEBIUS_API_KEY=your_nebius_api_key
-NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
-NEBIUS_MODEL=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
+# Google Gemini (create a key at https://aistudio.google.com/apikey)
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+GEMINI_MODEL=gemini-flash-latest
 
 # Anthropic (for comparisons)
 ANTHROPIC_API_KEY=your_anthropic_api_key

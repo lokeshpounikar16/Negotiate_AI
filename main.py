@@ -25,7 +25,7 @@ if _pkg_root not in sys.path:
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from Negotiate_AI.core.message_bus import get_message_bus
-from Negotiate_AI.core.nebius_client import get_nebius_client
+from Negotiate_AI.core.nebius_client import get_gemini_client
 from Negotiate_AI.core.round_manager import RoundManager
 from Negotiate_AI.core.schema import (
     MessageType,
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NegotiateAI",
-    description="Agent-to-Agent Negotiation Protocol — Nebius × NVIDIA Hackathon",
+    description="Agent-to-Agent Negotiation Protocol powered by Google Gemini",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -141,13 +141,13 @@ async def root():
 
 @app.get("/health", tags=["meta"])
 async def health():
-    """Check all dependencies: Nebius API + Redis message bus."""
-    nebius_status = await get_nebius_client().health_check()
+    """Check all dependencies: Gemini API + Redis message bus."""
+    gemini_status = await get_gemini_client().health_check()
     bus_status = await get_message_bus().health_check()
-    ok = nebius_status.get("status") == "ok" and bus_status.get("status") == "ok"
+    ok = gemini_status.get("status") == "ok" and bus_status.get("status") == "ok"
     return {
         "status": "ok" if ok else "degraded",
-        "nebius": nebius_status,
+        "gemini": gemini_status,
         "redis": bus_status,
     }
 
@@ -255,7 +255,7 @@ async def negotiate(req: CreateTaskRequest):
     )
 
     bus = get_message_bus()
-    client = get_nebius_client()
+    client = get_gemini_client()
     await bus.publish(task.task_id, task.to_negotiation_message())
     await broadcast_negotiation_update(task.task_id, {"type": "task_announcement", "message": task.to_negotiation_message().model_dump(mode="json")})
 
@@ -298,7 +298,7 @@ async def run_negotiation(req: CreateTaskRequest):
     )
 
     bus = get_message_bus()
-    client = get_nebius_client()
+    client = get_gemini_client()
     agents = {
         "cost_agent": CostAgent(nebius_client=client, message_bus=bus),
         "quality_agent": QualityAgent(nebius_client=client, message_bus=bus),

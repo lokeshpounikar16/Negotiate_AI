@@ -1,7 +1,7 @@
 # NegotiateAI — Agent-to-Agent Negotiation Protocol
-## Nebius × NVIDIA Hackathon
+## Negotiation AI
 
-A multi-agent system where specialized AI agents with conflicting objectives negotiate a shared plan through a typed protocol — bids, counter-proposals, and consensus — running on Nebius H100s.
+A multi-agent system where specialized AI agents with conflicting objectives negotiate a shared plan through a typed protocol — bids, counter-proposals, and consensus — using Google Gemini.
 
 ---
 
@@ -9,7 +9,7 @@ A multi-agent system where specialized AI agents with conflicting objectives neg
 
 This week builds:
 1. The `NegotiationMessage` protocol schema
-2. Nebius inference client (OpenAI-compatible)
+2. Google Gemini inference client (native `generateContent` API)
 3. A single Cost Agent that queries Tavily + produces a valid PROPOSAL
 4. FastAPI server with Redis message bus
 5. Unit tests for schema validation
@@ -22,7 +22,7 @@ This week builds:
 negotiateai/
 ├── core/
 │   ├── schema.py          # NegotiationMessage protocol schema (Pydantic)
-│   ├── nebius_client.py   # Nebius LLM inference wrapper
+│   ├── nebius_client.py   # Gemini LLM inference wrapper
 │   ├── message_bus.py     # Redis pub/sub message bus
 │   └── round_manager.py   # (Week 2) Negotiation round orchestrator
 ├── agents/
@@ -44,8 +44,12 @@ negotiateai/
 # 1. Clone and install
 pip install -r requirements.txt
 
-# 2. Copy env file and fill in your keys
+# 2. Copy env file and set your Gemini API key
 cp .env.example .env
+# On Windows PowerShell, use: Copy-Item .env.example .env
+
+# Edit .env and replace GEMINI_API_KEY with your key from
+# https://aistudio.google.com/apikey
 
 # 3. Start Redis (Docker)
 docker run -d -p 6379:6379 redis:alpine
@@ -63,7 +67,10 @@ uvicorn main:app --reload
 
 | Variable | Description |
 |---|---|
-| `NEBIUS_API_KEY` | Your Nebius Token Factory API key |
+| `GEMINI_API_KEY` | Your Google Gemini API key (create one at https://aistudio.google.com/apikey) |
+| `GEMINI_BASE_URL` | Gemini API base URL (default: `https://generativelanguage.googleapis.com/v1beta`) |
+| `GEMINI_MODEL` | Gemini model ID (default: `gemini-flash-latest`) |
 | `TAVILY_API_KEY` | Tavily search API key |
 | `REDIS_URL` | Redis connection string (default: redis://localhost:6379) |
-| `NEBIUS_MODEL` | Nebius Token Factory model ID (default: NVIDIA Nemotron 3 Nano; verify/copy the exact ID from the [model catalog](https://tokenfactory.nebius.com/models/catalog)) |
+
+Keep your real API key in `.env` only; do not commit or share it.

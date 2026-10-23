@@ -13,13 +13,18 @@ from .schema import (
     QualityTier,
     Concession,
 )
-from .nebius_client import NebiusClient, get_nebius_client
+from .nebius_client import (
+    GeminiClient,
+    NebiusClient,
+    get_gemini_client,
+    get_nebius_client,
+)
 from .message_bus import MessageBus, get_message_bus
 
 __all__ = [
     "NegotiationMessage", "TaskAnnouncement", "TaskConstraints",
     "ProposalPayload", "AgentID", "MessageType", "QualityTier", "Concession",
-    "NebiusClient", "get_nebius_client",
+    "GeminiClient", "get_gemini_client", "NebiusClient", "get_nebius_client",
     "MessageBus", "get_message_bus",
     "RoundManager",
 ]
